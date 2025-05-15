@@ -1,0 +1,257 @@
+﻿@{
+    ViewData["Title"] = "Student Exam Converter";
+}
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">
+                        <i class="fas fa-file-csv mr-2"></i>Student Exam CSV to JSON Converter
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <form id="converterForm" enctype="multipart/form-data" class="needs-validation" novalidate>
+                        <div class="form-group">
+                            <div class="custom-file">
+                                <input type="file" class="custom-file-input" id="csvFile" name="csvFile" accept=".csv" required>
+                                <label class="custom-file-label" for="csvFile">Choose CSV file...</label>
+                                <div class="invalid-feedback">Please select a valid CSV file (max 5MB)</div>
+                                <small class="form-text text-muted mt-2">
+                                    <i class="fas fa-info-circle mr-1"></i>File should contain: Student ID, Name, Learning Objective, Score, Subject
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="form-group text-center mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg px-4">
+                                <i class="fas fa-exchange-alt mr-2"></i>Convert
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="resultContainer" class="mt-4 d-none">
+                        <div class="card">
+                            <div class="card-header bg-success text-white">
+                                <h4 class="mb-0">
+                                    <i class="fas fa-check-circle mr-2"></i>Conversion Results
+                                </h4>
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-success d-none" id="successAlert"></div>
+                                <div class="alert alert-danger d-none" id="errorAlert"></div>
+
+                                <div class="form-group">
+                                    <label>JSON Output:</label>
+                                    <div class="position-relative">
+                                        <pre id="jsonResult" class="bg-light p-3 rounded" style="min-height: 200px; max-height: 400px; overflow-y: auto;"></pre>
+                                        <button id="copyBtn" class="btn btn-sm btn-outline-secondary position-absolute" style="top: 10px; right: 10px;">
+                                            <i class="far fa-copy mr-1"></i>Copy
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="text-center mt-3">
+                                    <button id="downloadBtn" class="btn btn-success">
+                                        <i class="fas fa-download mr-2"></i>Download JSON
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Styles {
+    <style>
+        .custom-file-input:lang(en) ~ .custom-file-label::after {
+            content: "Browse";
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .card {
+            border-radius: 10px;
+        }
+        .btn {
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+    </style>
+}
+
+@section Scripts {
+    <script>
+        $(document).ready(function() {
+
+            $('.custom-file-input').on('change', function() {
+                let fileName = $(this).val().split('\\').pop();
+                $(this).next('.custom-file-label').addClass("selected").html(fileName);
+                $(this).removeClass('is-invalid');
+            });
+
+            $('#converterForm').submit(function(e) {
+                e.preventDefault();
+                resetUI();
+
+                const fileInput = $('#csvFile')[0];
+                if (!validateFile(fileInput)) return;
+
+                showLoading();
+                processFile(fileInput.files[0]);
+            });
+
+            $('#copyBtn').click(function() {
+                const jsonText = $('#jsonResult').text();
+                navigator.clipboard.writeText(jsonText).then(() => {
+                    showToast('Copied to clipboard!', 'success');
+                });
+            });
+
+            $('#downloadBtn').click(function() {
+                const jsonText = $('#jsonResult').text();
+                const blob = new Blob([jsonText], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'student_results_' + new Date().toISOString().slice(0,10) + '.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+
+            function validateFile(fileInput) {
+                if (!fileInput.files || fileInput.files.length === 0) {
+                    showError('Please select a file');
+                    $(fileInput).addClass('is-invalid');
+                    return false;
+                }
+
+                const file = fileInput.files[0];
+                const validTypes = ['text/csv', 'application/vnd.ms-excel'];
+                const maxSize = 5 * 1024 * 1024; 
+
+                if (!file.name.endsWith('.csv')) {
+                    showError('Only CSV files are allowed');
+                    $(fileInput).addClass('is-invalid');
+                    return false;
+                }
+
+                if (file.size > maxSize) {
+                    showError('File size must be less than 5MB');
+                    $(fileInput).addClass('is-invalid');
+                    return false;
+                }
+
+                return true;
+            }
+               function processFile(file) {
+            showLoading(); 
+
+            const formData = new FormData();
+            formData.append('csvFile', file);
+
+            $.ajax({
+                url: '/api/StudentExam/convert',
+                type: 'POST',
+                data: formData,
+                contentType: false,
+                processData: false,
+                success: function(data) {
+                    displayResult(data);
+                    hideLoading();
+                },
+                error: function(xhr) {
+                    let errorMsg = 'Error processing file';
+                    if (xhr.responseJSON) {
+                        if (xhr.responseJSON.message) {
+                            errorMsg = xhr.responseJSON.message;
+                        }
+                        if (xhr.responseJSON.errors) {
+                            errorMsg += '\n' + xhr.responseJSON.errors.join('\n');
+                        }
+                    }
+                    showError(errorMsg);
+                    hideLoading(); 
+                }
+            });
+        }
+
+        function showLoading() {
+            $('#converterForm button[type="submit"]')
+                .html('<span class="spinner-border spinner-border-sm mr-2" role="status"></span>Processing...')
+                .prop('disabled', true);
+        }
+
+        function hideLoading() {
+            $('#converterForm button[type="submit"]')
+                .html('<i class="fas fa-exchange-alt mr-2"></i>Convert')
+                .prop('disabled', false);
+        }
+
+            function displayResult(data) {
+                $('#successAlert').text('File converted successfully!').removeClass('d-none');
+                $('#errorAlert').addClass('d-none');
+                $('#jsonResult').text(JSON.stringify(data, null, 2));
+                $('#resultContainer').removeClass('d-none');
+                $('html, body').animate({
+                    scrollTop: $('#resultContainer').offset().top - 20
+                }, 500);
+            }
+
+            function showError(message) {
+                $('#errorAlert').html(message.replace(/\n/g, '<br>')).removeClass('d-none');
+                $('#successAlert').addClass('d-none');
+                $('#resultContainer').removeClass('d-none');
+                $('html, body').animate({
+                    scrollTop: $('#resultContainer').offset().top - 20
+                }, 500);
+            }
+
+            function resetUI() {
+                $('#errorAlert').addClass('d-none').empty();
+                $('#successAlert').addClass('d-none').empty();
+            }
+
+            function showLoading() {
+                $('#converterForm button[type="submit"]')
+                    .html('<span class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></span>Processing...')
+                    .prop('disabled', true);
+            }
+
+            function hideLoading() {
+                $('#converterForm button[type="submit"]')
+                    .html('<i class="fas fa-exchange-alt mr-2"></i>Convert')
+                    .prop('disabled', false);
+            }
+
+            function showToast(message, type = 'success') {
+                const toast = $(`<div class="toast align-items-center text-white bg-${type} border-0 position-fixed" style="bottom: 20px; right: 20px; z-index: 1000">
+                    <div class="d-flex">
+                        <div class="toast-body">${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>`);
+
+                $('body').append(toast);
+                const bsToast = new bootstrap.Toast(toast[0]);
+                bsToast.show();
+
+                setTimeout(() => {
+                    bsToast.dispose();
+                    toast.remove();
+                }, 3000);
+            }
+        });
+    </script>
+}

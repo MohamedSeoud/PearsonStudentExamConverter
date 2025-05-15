@@ -1,0 +1,11 @@
+Pearson Student Exam Converter - Setup Instructions
+
+Prerequisites
+- .NET 6 SDK
+- Visual Studio 2022 or VS Code (optional)
+
+ Setup
+1. Clone the repository
+2. Restore packages:
+   ```bash
+   dotnet restore
